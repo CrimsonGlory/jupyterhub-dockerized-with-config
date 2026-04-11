@@ -17,7 +17,7 @@ c.DockerSpawner.username_template = "{username}"
 
 # Persistent storage
 c.DockerSpawner.volumes = {
-    "jupyterhub-user-{username}": "/home/student"
+    "jupyterhub-user-{username}": "/home/jovyan/work"
 }
 
 # Resource limits (your 32GB system)
