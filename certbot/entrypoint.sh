@@ -2,9 +2,7 @@
 set -eu
 
 DOMAIN="${CERTBOT_DOMAIN:?CERTBOT_DOMAIN is required}"
-EMAIL="${CERTBOT_EMAIL:?CERTBOT_EMAIL is required}"
 WEBROOT=/var/www/certbot
-DOCKER_SOCK=/var/run/docker.sock
 NGINX_CONTAINER=nginx
 DOCKER_API_VERSION=v1.41
 
@@ -29,14 +27,25 @@ if certbot certificates 2>/dev/null | grep -Fq "Certificate Name: ${DOMAIN}"; th
     echo "Certbot already manages a certificate for ${DOMAIN}."
 else
     echo "Requesting Let's Encrypt certificate for ${DOMAIN} (webroot)..."
-    certbot certonly \
-        --webroot -w "${WEBROOT}" \
-        -d "${DOMAIN}" \
-        --email "${EMAIL}" \
-        --agree-tos \
-        --non-interactive \
-        --no-eff-email \
-        --deploy-hook "${DEPLOY_HOOK}"
+    if [ -n "${CERTBOT_EMAIL:-}" ]; then
+        certbot certonly \
+            --webroot -w "${WEBROOT}" \
+            -d "${DOMAIN}" \
+            --email "${CERTBOT_EMAIL}" \
+            --agree-tos \
+            --non-interactive \
+            --no-eff-email \
+            --deploy-hook "${DEPLOY_HOOK}"
+    else
+        echo "CERTBOT_EMAIL is empty; registering ACME account without an email (--register-unsafely-without-email)."
+        certbot certonly \
+            --webroot -w "${WEBROOT}" \
+            -d "${DOMAIN}" \
+            --register-unsafely-without-email \
+            --agree-tos \
+            --non-interactive \
+            --deploy-hook "${DEPLOY_HOOK}"
+    fi
 fi
 
 trap exit TERM
