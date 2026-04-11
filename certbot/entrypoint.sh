@@ -2,6 +2,7 @@
 set -eu
 
 WEBROOT=/var/www/certbot
+RELOAD_HOOK="/usr/local/bin/reload-via-docker-socket.py"
 
 le_domain_from_nginx_conf() {
     conf="${1:-/etc/nginx/nginx.conf}"
@@ -28,6 +29,12 @@ resolve_domain() {
     fi
 }
 
+# True iff certbot lists this exact lineage name (not e.g. example.com when only example.com-0001 exists).
+has_lineage_name() {
+    name="$1"
+    certbot certificates 2>/dev/null | sed -n 's/^  Certificate Name: //p' | grep -Fxq "$name"
+}
+
 # One-shot: mkdir -p live/<domain>/ and self-signed PEMs so nginx can start before real issuance.
 bootstrap_self_signed_if_needed() {
     LIVE="/etc/letsencrypt/live/${DOMAIN}"
@@ -41,6 +48,32 @@ bootstrap_self_signed_if_needed() {
     fi
 }
 
+# Remove openssl bootstrap dirs so certonly can use .../live/<domain>/ (avoids -0001 and "live directory exists").
+clear_unmanaged_live_for_domain() {
+    LIVE="/etc/letsencrypt/live/${DOMAIN}"
+    if has_lineage_name "${DOMAIN}"; then
+        return 0
+    fi
+    if [ -d "${LIVE}" ] || [ -d "/etc/letsencrypt/archive/${DOMAIN}" ] || [ -f "/etc/letsencrypt/renewal/${DOMAIN}.conf" ]; then
+        echo "Removing unmanaged paths for ${DOMAIN} so certbot can claim the standard lineage (archive/live/renewal)."
+        rm -rf "/etc/letsencrypt/archive/${DOMAIN}" "/etc/letsencrypt/live/${DOMAIN}"
+        rm -f "/etc/letsencrypt/renewal/${DOMAIN}.conf"
+    fi
+}
+
+# Renewal configs with no matching issued certificate (e.g. broken INI) make 'certbot renew' exit non-zero.
+prune_orphan_renewal_configs() {
+    for cfg in /etc/letsencrypt/renewal/*.conf; do
+        [ -f "$cfg" ] || continue
+        base=$(basename "$cfg" .conf)
+        if has_lineage_name "${base}"; then
+            continue
+        fi
+        echo "Removing orphan renewal file ${cfg} (no issued certificate named '${base}')."
+        rm -f "$cfg"
+    done
+}
+
 if [ "${1:-}" = "bootstrap" ]; then
     resolve_domain
     bootstrap_self_signed_if_needed
@@ -49,8 +82,7 @@ fi
 
 resolve_domain
 
-# Stored in renewal config; use a fixed path (certbot image has no curl).
-DEPLOY_HOOK="python3 /usr/local/bin/reload-via-docker-socket.py || true"
+chmod +x "${RELOAD_HOOK}" 2>/dev/null || true
 
 # Do not use urllib on GET / — nginx redirects HTTP to HTTPS and urllib follows, then fails on the self-signed cert.
 echo "Waiting for nginx to listen on TCP port 80..."
@@ -67,9 +99,10 @@ if [ "${i}" -ge 90 ]; then
     exit 1
 fi
 
-if certbot certificates 2>/dev/null | grep -Fq "Certificate Name: ${DOMAIN}"; then
-    echo "Certbot already manages a certificate for ${DOMAIN}."
+if has_lineage_name "${DOMAIN}"; then
+    echo "Certbot already manages a certificate named ${DOMAIN}."
 else
+    clear_unmanaged_live_for_domain
     echo "Requesting Let's Encrypt certificate for ${DOMAIN} (webroot)..."
     if [ -n "${CERTBOT_EMAIL:-}" ]; then
         certbot certonly \
@@ -79,7 +112,7 @@ else
             --agree-tos \
             --non-interactive \
             --no-eff-email \
-            --deploy-hook "${DEPLOY_HOOK}"
+            --deploy-hook "${RELOAD_HOOK}"
     else
         echo "CERTBOT_EMAIL is empty; registering ACME account without an email (--register-unsafely-without-email)."
         certbot certonly \
@@ -88,14 +121,18 @@ else
             --register-unsafely-without-email \
             --agree-tos \
             --non-interactive \
-            --deploy-hook "${DEPLOY_HOOK}"
+            --deploy-hook "${RELOAD_HOOK}"
     fi
+fi
+
+if has_lineage_name "${DOMAIN}-0001" && ! has_lineage_name "${DOMAIN}"; then
+    echo "NOTE: An issued certificate exists only as lineage '${DOMAIN}-0001}'. Update nginx ssl_certificate / ssl_certificate_key paths to /etc/letsencrypt/live/${DOMAIN}-0001/... or clear the letsencrypt volume and recreate so the standard name ${DOMAIN} is used." >&2
 fi
 
 trap exit TERM
 echo "Running periodic certbot renew (every 12h)..."
 while true; do
-    # deploy-hook from the initial certonly is stored in the renewal config.
+    prune_orphan_renewal_configs
     certbot renew --non-interactive
     sleep 12h &
     wait "${!}"
