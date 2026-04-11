@@ -33,7 +33,11 @@ resolve_domain() {
 # True iff certbot lists this exact lineage name (not e.g. example.com when only example.com-0001 exists).
 has_lineage_name() {
     name="$1"
-    certbot certificates 2>/dev/null | sed -n 's/^  Certificate Name: //p' | grep -Fxq "$name"
+    certbot certificates 2>/dev/null |
+        sed -n 's/^  Certificate Name: //p' |
+        tr -d '\r' |
+        sed 's/[[:space:]]*$//' |
+        grep -Fxq "$name"
 }
 
 # One-shot: mkdir -p live/<domain>/ and self-signed PEMs so nginx can start before real issuance.
@@ -138,8 +142,12 @@ else
     fi
 fi
 
+# Only warn when nginx still references live/<domain>/ while Certbot only has <domain>-0001 (avoids spam after you fix nginx paths).
 if has_lineage_name "${DOMAIN}-0001" && ! has_lineage_name "${DOMAIN}"; then
-    echo "NOTE: An issued certificate exists only as lineage '${DOMAIN}-0001}'. Update nginx ssl_certificate / ssl_certificate_key paths to /etc/letsencrypt/live/${DOMAIN}-0001/... or clear the letsencrypt volume and recreate so the standard name ${DOMAIN} is used." >&2
+    if grep -qF "/etc/letsencrypt/live/${DOMAIN}/" /etc/nginx/nginx.conf 2>/dev/null &&
+        ! grep -qF "/etc/letsencrypt/live/${DOMAIN}-0001/" /etc/nginx/nginx.conf 2>/dev/null; then
+        echo "NOTE: Issued certificate lineage is '${DOMAIN}-0001' but nginx ssl paths still use /etc/letsencrypt/live/${DOMAIN}/. Point ssl_certificate and ssl_certificate_key at /etc/letsencrypt/live/${DOMAIN}-0001/ or remove the ${DOMAIN}-0001 lineage and re-issue as ${DOMAIN}." >&2
+    fi
 fi
 
 trap exit TERM
