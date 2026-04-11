@@ -52,10 +52,11 @@ resolve_domain
 # Stored in renewal config; use a fixed path (certbot image has no curl).
 DEPLOY_HOOK="python3 /usr/local/bin/reload-via-docker-socket.py || true"
 
-echo "Waiting for nginx to accept HTTP on port 80..."
+# Do not use urllib on GET / — nginx redirects HTTP to HTTPS and urllib follows, then fails on the self-signed cert.
+echo "Waiting for nginx to listen on TCP port 80..."
 i=0
 while [ "${i}" -lt 90 ]; do
-    if python3 -c "import urllib.request; urllib.request.urlopen('http://nginx:80/', timeout=5)" >/dev/null 2>&1; then
+    if python3 -c "import socket; s=socket.create_connection(('nginx', 80), timeout=5); s.close()" >/dev/null 2>&1; then
         break
     fi
     i=$((i + 1))
