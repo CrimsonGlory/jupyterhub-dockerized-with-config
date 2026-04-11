@@ -60,6 +60,7 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./certbot/entrypoint.sh:/usr/local/bin/certbot-compose-entrypoint.sh:ro
+      - ./certbot/reload-via-docker-socket.py:/usr/local/bin/reload-via-docker-socket.py:ro
     entrypoint: ["/bin/sh", "/usr/local/bin/certbot-compose-entrypoint.sh"]
     depends_on:
       nginx:

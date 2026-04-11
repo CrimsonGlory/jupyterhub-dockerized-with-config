@@ -53,6 +53,7 @@ This repository can obtain and renew TLS certificates using [Let's Encrypt](http
 
 - **`cannot load certificate .../live/<name>/fullchain.pem`**: ensure **`certbot-bootstrap`** completed successfully (`docker compose ps -a`, or logs for `certbot-bootstrap`). If it exited with an error, nginx will not start until bootstrap succeeds (for example fix `nginx.conf` / domain resolution, then `docker compose up` again).
 - **Wrong hostname under `live/`**: align `CERTBOT_DOMAIN` in `.env` with the `ssl_certificate .../live/<hostname>/fullchain.pem` line in `nginx.conf`, or unset `CERTBOT_DOMAIN` so the name is inferred from `nginx.conf` only.
+- **Renew / deploy-hook errors after upgrading this repo**: older configs may have stored a deploy hook that called `curl`. New hooks use `python3 /usr/local/bin/reload-via-docker-socket.py`. Re-run `certbot certonly ...` once to refresh the renewal metadata, or edit the `deploy_hook` line under `/etc/letsencrypt/renewal/` inside the `letsencrypt` volume.
 
 ## Create user
 
