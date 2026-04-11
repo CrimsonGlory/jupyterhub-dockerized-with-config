@@ -1,10 +1,55 @@
 #!/bin/sh
 set -eu
 
-DOMAIN="${CERTBOT_DOMAIN:?CERTBOT_DOMAIN is required}"
 WEBROOT=/var/www/certbot
 NGINX_CONTAINER=nginx
 DOCKER_API_VERSION=v1.41
+
+le_domain_from_nginx_conf() {
+    conf="${1:-/etc/nginx/nginx.conf}"
+    [ -f "$conf" ] || return 0
+    grep -E '^[[:space:]]*ssl_certificate[[:space:]]+/etc/letsencrypt/live/[^[:space:]/]+/fullchain\.pem' "$conf" 2>/dev/null |
+        head -1 |
+        sed -n 's|.*\/etc/letsencrypt/live/\([^/]*\)/fullchain.pem.*|\1|p'
+}
+
+resolve_domain() {
+    NGINX_DOMAIN=$(le_domain_from_nginx_conf /etc/nginx/nginx.conf)
+    if [ -n "${CERTBOT_DOMAIN:-}" ]; then
+        DOMAIN="${CERTBOT_DOMAIN}"
+    else
+        DOMAIN="${NGINX_DOMAIN}"
+    fi
+    if [ -z "$DOMAIN" ]; then
+        echo "Could not determine hostname for certificates: set CERTBOT_DOMAIN in .env or add ssl_certificate .../etc/letsencrypt/live/<name>/fullchain.pem in nginx.conf." >&2
+        exit 1
+    fi
+    if [ -n "${CERTBOT_DOMAIN:-}" ] && [ -n "${NGINX_DOMAIN}" ] && [ "${CERTBOT_DOMAIN}" != "${NGINX_DOMAIN}" ]; then
+        echo "CERTBOT_DOMAIN (${CERTBOT_DOMAIN}) does not match ssl_certificate path in nginx.conf (${NGINX_DOMAIN}). Fix one of them so they match." >&2
+        exit 1
+    fi
+}
+
+# One-shot: mkdir -p live/<domain>/ and self-signed PEMs so nginx can start before real issuance.
+bootstrap_self_signed_if_needed() {
+    LIVE="/etc/letsencrypt/live/${DOMAIN}"
+    echo "certbot bootstrap: ensuring placeholder TLS files under ${LIVE}"
+    mkdir -p "${LIVE}"
+    if [ ! -f "${LIVE}/fullchain.pem" ] || [ ! -f "${LIVE}/privkey.pem" ]; then
+        openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
+            -subj "/CN=${DOMAIN}" \
+            -keyout "${LIVE}/privkey.pem" \
+            -out "${LIVE}/fullchain.pem"
+    fi
+}
+
+if [ "${1:-}" = "bootstrap" ]; then
+    resolve_domain
+    bootstrap_self_signed_if_needed
+    exit 0
+fi
+
+resolve_domain
 
 # Stored in renewal config; keep literal paths (no env vars) for reliability after renew.
 DEPLOY_HOOK="sh -c 'curl -fsS --unix-socket /var/run/docker.sock -X POST http://localhost/${DOCKER_API_VERSION}/containers/${NGINX_CONTAINER}/kill?signal=HUP >/dev/null 2>&1 || true'"

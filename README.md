@@ -21,30 +21,38 @@ This repository can obtain and renew TLS certificates using [Let's Encrypt](http
 ### What you configure
 
 1. Copy `nginx/nginx.conf.example-with-ssl` to `nginx/nginx.conf`.
-2. Replace every `course.example.com` in that file with your real public hostname (the same value you use for `CERTBOT_DOMAIN`).
-3. Copy `.env.example` to `.env` and set `CERTBOT_DOMAIN` to that hostname. Set `CERTBOT_EMAIL` if you want an account email with Let's Encrypt (recommended for expiry and incident notices). If you leave `CERTBOT_EMAIL` empty, the certbot script uses Certbot’s `--register-unsafely-without-email` flag so no email is registered (Let’s Encrypt will not be able to warn you by email).
+2. Replace every `course.example.com` in that file with your real public hostname (in `server_name` and in the `ssl_certificate` / `ssl_certificate_key` paths under `/etc/letsencrypt/live/...`).
+3. Copy `.env.example` to `.env`. You do **not** create certificates by hand: a bootstrap step creates a short-lived self-signed file at the same `live/<hostname>/` paths so nginx can start, then Certbot replaces it with a real Let’s Encrypt certificate.
+4. Set `CERTBOT_DOMAIN` in `.env` to the same hostname **only if** you want an explicit override; otherwise leave it unset and the certbot scripts infer the name from the `ssl_certificate .../live/<hostname>/fullchain.pem` line in `nginx.conf` (so it stays consistent even if you never touch `.env`).
+5. If you set both `CERTBOT_DOMAIN` and an `ssl_certificate` path in `nginx.conf`, they must match or the certbot containers exit with an error.
+6. Set `CERTBOT_EMAIL` if you want a Let’s Encrypt account email (recommended). If you leave it empty, Certbot uses `--register-unsafely-without-email` (no email, so no expiry notices from Let’s Encrypt).
 
 ### What runs in Docker Compose
 
+- **`certbot-bootstrap`** is a **one-shot** service (same image and `certbot/entrypoint.sh` as the long-running certbot, with argument `bootstrap`). It runs `mkdir -p` under `/etc/letsencrypt/live/<your-domain>/` and, if needed, creates **short-lived self-signed** `fullchain.pem` / `privkey.pem` so nginx can load TLS paths before Let’s Encrypt has issued anything. It finishes successfully, then **nginx** starts (Compose `depends_on` with `service_completed_successfully`). Your browser may warn until the real certificate is in place.
 - **nginx** listens on ports **80** and **443**. It proxies JupyterHub and serves `/.well-known/acme-challenge/` from a shared volume (`certbot-www`) so Let’s Encrypt can complete **HTTP-01** validation.
-- Before nginx loads TLS for the first time, a small **entrypoint script** in the nginx image may create a **short-lived self-signed** certificate under `/etc/letsencrypt/live/<your-domain>/` so nginx can start even before a real certificate exists. Your browser will show a warning only until the first successful issuance replaces those files.
-- The **certbot** container waits until nginx answers on port 80, then runs `certbot certonly --webroot` against that shared webroot. When a certificate is issued, a **deploy hook** reloads nginx so it begins serving the Let’s Encrypt chain without a full container restart.
-- The same **certbot** container then loops `certbot renew` about every **12 hours**. Renewals reuse the stored authenticator settings; when a certificate is actually renewed, the same hook reloads nginx again.
+- The **`certbot`** service waits until nginx answers on port 80, then runs `certbot certonly --webroot` against that shared webroot. When a certificate is issued, a **deploy hook** reloads nginx so it begins serving the Let’s Encrypt chain without a full container restart.
+- The same **`certbot`** container then loops `certbot renew` about every **12 hours**. Renewals reuse the stored authenticator settings; when a certificate is actually renewed, the same hook reloads nginx again.
 
 ### Volumes
 
-- `**letsencrypt`**: certificate material and Certbot metadata (`/etc/letsencrypt` in the containers).
-- `**certbot-www`**: HTTP-01 challenge files under `/var/www/certbot`.
+- **letsencrypt**: certificate material and Certbot metadata (`/etc/letsencrypt` in the containers).
+- **certbot-www**: HTTP-01 challenge files under `/var/www/certbot`.
 
 ### Requirements
 
-- DNS for `CERTBOT_DOMAIN` must point to this host.
+- DNS for the hostname in `nginx.conf` (and `CERTBOT_DOMAIN`, if you set it) must point to this host.
 - **TCP 80** must reach nginx (required for HTTP-01 issuance and renewal). **443** must be reachable for HTTPS clients.
 
 ### Caveats
 
 - Let's Encrypt has [rate limits](https://letsencrypt.org/docs/rate-limits/); repeated failed attempts while debugging can temporarily block issuance.
 - If something goes wrong and you need a clean slate for certificates, you can remove the named volume that backs `letsencrypt` (this deletes issued certs and account state for that stack) after `docker compose down`, then bring the stack up again.
+
+### Troubleshooting
+
+- **`cannot load certificate .../live/<name>/fullchain.pem`**: ensure **`certbot-bootstrap`** completed successfully (`docker compose ps -a`, or logs for `certbot-bootstrap`). If it exited with an error, nginx will not start until bootstrap succeeds (for example fix `nginx.conf` / domain resolution, then `docker compose up` again).
+- **Wrong hostname under `live/`**: align `CERTBOT_DOMAIN` in `.env` with the `ssl_certificate .../live/<hostname>/fullchain.pem` line in `nginx.conf`, or unset `CERTBOT_DOMAIN` so the name is inferred from `nginx.conf` only.
 
 ## Create user
 

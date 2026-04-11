@@ -1,12 +1,13 @@
 # Example nginx config with TLS (Let's Encrypt), wired for docker-compose in this repo.
 #
 # 1. Copy this file to nginx.conf.
-# 2. Replace every course.example.com with your real hostname (must match CERTBOT_DOMAIN in .env).
-# 3. Copy .env.example to .env and set CERTBOT_DOMAIN (CERTBOT_EMAIL optional; see README).
+# 2. Replace every course.example.com with your real hostname in server_name and in the
+#    ssl_certificate / ssl_certificate_key paths (bootstrap + certbot infer the name from there).
+# 3. Copy .env.example to .env (CERTBOT_DOMAIN optional if paths above are correct; see README).
 # 4. docker compose up --build
 #
-# Compose runs nginx (with a short-lived self-signed cert until issuance succeeds) and a
-# certbot service that obtains/renews certificates over HTTP-01 and reloads nginx via Docker.
+# Compose runs certbot-bootstrap (mkdir + short-lived self-signed PEMs), then nginx, then
+# certbot for issuance/renew over HTTP-01 and nginx reload via Docker.
 
 events {
     worker_connections 1024;
