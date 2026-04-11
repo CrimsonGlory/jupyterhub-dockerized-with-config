@@ -61,16 +61,28 @@ clear_unmanaged_live_for_domain() {
     fi
 }
 
-# Renewal configs with no matching issued certificate (e.g. broken INI) make 'certbot renew' exit non-zero.
-prune_orphan_renewal_configs() {
+# Renewal configs with no matching lineage, or a corrupt renewal INI, make `certbot renew` exit non-zero.
+# A lineage can still appear in `certbot certificates` while its renewal file is broken (e.g. bad deploy_hook).
+prune_bad_renewal_configs() {
     for cfg in /etc/letsencrypt/renewal/*.conf; do
         [ -f "$cfg" ] || continue
         base=$(basename "$cfg" .conf)
-        if has_lineage_name "${base}"; then
-            continue
+        remove=""
+        if ! has_lineage_name "${base}"; then
+            remove=1
+        else
+            log=$(mktemp)
+            if ! certbot renew --cert-name "${base}" --dry-run >"${log}" 2>&1; then
+                if grep -qiE 'parsefail|Renewal configuration file .* is broken|missing a required file reference' "${log}"; then
+                    remove=1
+                fi
+            fi
+            rm -f "${log}"
         fi
-        echo "Removing orphan renewal file ${cfg} (no issued certificate named '${base}')."
-        rm -f "$cfg"
+        if [ -n "$remove" ]; then
+            echo "Removing renewal file ${cfg} (no matching lineage name, or renewal config broken / unparseable)."
+            rm -f "${cfg}"
+        fi
     done
 }
 
@@ -132,7 +144,7 @@ fi
 trap exit TERM
 echo "Running periodic certbot renew (every 12h)..."
 while true; do
-    prune_orphan_renewal_configs
+    prune_bad_renewal_configs
     certbot renew --non-interactive
     sleep 12h &
     wait "${!}"
