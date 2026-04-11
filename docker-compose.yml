@@ -1,0 +1,27 @@
+services:
+  hub:
+    build: ./hub
+    container_name: jupyterhub
+    restart: always
+    volumes:
+      - ./hub/jupyterhub_config.py:/srv/jupyterhub/jupyterhub_config.py
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - jupyterhub-network
+
+  nginx:
+    image: nginx:latest
+    container_name: nginx
+    restart: always
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+    depends_on:
+      - hub
+    networks:
+      - jupyterhub-network
+
+networks:
+  jupyterhub-network:
+    name: jupyterhub-network
