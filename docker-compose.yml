@@ -15,13 +15,43 @@ services:
     restart: always
     ports:
       - "80:80"
+      - "443:443"
+    environment:
+      CERTBOT_DOMAIN: ${CERTBOT_DOMAIN:-course.example.com}
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/docker-entrypoint.d/50-selfsigned-ssl-if-needed.sh:/docker-entrypoint.d/50-selfsigned-ssl-if-needed.sh:ro
+      - letsencrypt:/etc/letsencrypt
+      - certbot-www:/var/www/certbot:ro
     depends_on:
       - hub
+    networks:
+      - jupyterhub-network
+
+  certbot:
+    image: certbot/certbot:latest
+    container_name: certbot
+    restart: unless-stopped
+    user: "0:0"
+    environment:
+      CERTBOT_DOMAIN: ${CERTBOT_DOMAIN:-course.example.com}
+      CERTBOT_EMAIL: ${CERTBOT_EMAIL:?Set CERTBOT_EMAIL in .env; see .env.example}
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - certbot-www:/var/www/certbot
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./certbot/entrypoint.sh:/usr/local/bin/certbot-compose-entrypoint.sh:ro
+    entrypoint: ["/bin/sh", "/usr/local/bin/certbot-compose-entrypoint.sh"]
+    depends_on:
+      nginx:
+        condition: service_started
     networks:
       - jupyterhub-network
 
 networks:
   jupyterhub-network:
     name: jupyterhub-network
+
+volumes:
+  letsencrypt:
+  certbot-www:
