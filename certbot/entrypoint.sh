@@ -2,7 +2,8 @@
 set -eu
 
 WEBROOT=/var/www/certbot
-RELOAD_HOOK="/usr/local/bin/reload-via-docker-socket.py"
+# Executable shell wrapper (Certbot rejects non-executable hooks; .py may be bind-mounted without +x).
+RELOAD_HOOK="/usr/local/lib/certbot-hooks/deploy-nginx-reload.sh"
 
 le_domain_from_nginx_conf() {
     conf="${1:-/etc/nginx/nginx.conf}"
