@@ -9,19 +9,70 @@ services:
     networks:
       - jupyterhub-network
 
+  # One-shot: creates /etc/letsencrypt/live/<domain>/ and short-lived self-signed PEMs so nginx can load TLS before Let's Encrypt runs.
+  certbot-bootstrap:
+    image: certbot/certbot:latest
+    container_name: certbot-bootstrap
+    restart: "no"
+    user: "0:0"
+    environment:
+      CERTBOT_DOMAIN: ${CERTBOT_DOMAIN:-course.example.com}
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certbot/entrypoint.sh:/usr/local/bin/certbot-compose-entrypoint.sh:ro
+    entrypoint: ["/bin/sh", "/usr/local/bin/certbot-compose-entrypoint.sh", "bootstrap"]
+    networks:
+      - jupyterhub-network
+
   nginx:
     image: nginx:latest
     container_name: nginx
     restart: always
     ports:
       - "80:80"
+      - "443:443"
+    environment:
+      CERTBOT_DOMAIN: ${CERTBOT_DOMAIN:-course.example.com}
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - letsencrypt:/etc/letsencrypt
+      - certbot-www:/var/www/certbot:ro
     depends_on:
-      - hub
+      hub:
+        condition: service_started
+      certbot-bootstrap:
+        condition: service_completed_successfully
+    networks:
+      - jupyterhub-network
+
+  certbot:
+    image: certbot/certbot:latest
+    container_name: certbot
+    restart: unless-stopped
+    user: "0:0"
+    environment:
+      CERTBOT_DOMAIN: ${CERTBOT_DOMAIN:-course.example.com}
+      CERTBOT_EMAIL: ${CERTBOT_EMAIL:-}
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - certbot-www:/var/www/certbot
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./certbot/entrypoint.sh:/usr/local/bin/certbot-compose-entrypoint.sh:ro
+      - ./certbot/reload-via-docker-socket.py:/usr/local/lib/certbot-hooks/reload-via-docker-socket.py:ro
+      - ./certbot/deploy-nginx-reload.sh:/usr/local/lib/certbot-hooks/deploy-nginx-reload.sh
+    entrypoint: ["/bin/sh", "/usr/local/bin/certbot-compose-entrypoint.sh"]
+    depends_on:
+      nginx:
+        condition: service_started
     networks:
       - jupyterhub-network
 
 networks:
   jupyterhub-network:
     name: jupyterhub-network
+
+volumes:
+  letsencrypt:
+  certbot-www:
