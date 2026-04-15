@@ -75,3 +75,5 @@ JupyterLab already has a simple editor with syntax highlighting for Python (that
 Each student spawns its own container. You may want to remove the line about passwordless sudo in students/Dockerfile if you do not need your students to have root access inside the container.
 
 The **certbot** service mounts the host **Docker socket** (`/var/run/docker.sock`) read-only so that, after a certificate is obtained or renewed, Certbot’s deploy hook can ask the Docker engine to send **SIGHUP** to the **nginx** container. Nginx reloads its configuration and picks up the new certificate files from the shared volume without restarting the hub. That socket is powerful: any process that can use it can control the Docker daemon, so treat the host, compose file, and images as part of your trust boundary. If you prefer not to expose the socket, you would need another way to reload nginx after renewals (for example a sidecar or host cron that runs `docker compose exec nginx nginx -s reload` with tightly scoped credentials).
+
+We also mount Docker socket on hub service so that hub can spawn containers for students. The same applies applies for hub service.
